@@ -89,8 +89,31 @@ async def brave_search(query: str, count: int = 10) -> list[dict]:
             "url": item.get("url", ""),
             "snippet": item.get("description", ""),
         })
+    for i, result in enumerate(results[:2]):
+        scraped = await scrape_page(result["url"])
+        if scraped:
+            result["scraped"] = scraped
     return results
 
+async def scrape_page(url: str, max_chars: int = 2000) -> str:
+    """Fetch a URL and extract plain text, truncated to max_chars."""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; EntityBot/1.0)"}
+        async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            html = resp.text
+
+        # Strip scripts/styles
+        import re
+        html = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        # Strip all tags
+        text = re.sub(r'<[^>]+>', ' ', html)
+        # Collapse whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text[:max_chars]
+    except Exception:
+        return ""
 
 def build_search_queries(user_query: str) -> list[str]:
     """
@@ -132,9 +155,6 @@ Return ONLY a JSON array of 3 strings. No explanation. Example:
 
 
 def format_search_results(all_results: list[tuple[str, list[dict]]]) -> str:
-    """
-    Format all search results into a single text block for the LLM.
-    """
     lines = []
     for query, results in all_results:
         lines.append(f"\n=== Search: {query} ===")
@@ -142,48 +162,46 @@ def format_search_results(all_results: list[tuple[str, list[dict]]]) -> str:
             lines.append(f"\n[{i}] {r['title']}")
             lines.append(f"URL: {r['url']}")
             lines.append(f"Snippet: {r['snippet']}")
+            if r.get("scraped"):
+                lines.append(f"Page content: {r['scraped']}")
     return "\n".join(lines)
 
 
-EXTRACTION_SYSTEM_PROMPT = """You are an entity extraction expert. You receive raw web search results and extract structured entity data from them.
+async def extract_entities(user_query: str, search_context: str) -> list[dict]:
+    system_prompt = """You are an entity extraction expert. Extract structured entity data from web search results.
 
-For cafe/coffee queries, extract cafes as entities. Each entity must have:
-- cafe_name: exact name as it appears in sources
-- neighborhood: neighborhood and/or city
-- website: official website URL if mentioned, else null
-- signature_drink: the best/most notable specific drink to order (not generic like "coffee")
-- drink_type: one of: espresso, latte, pour over, cold brew, cortado, cappuccino, drip, other
-- price_range: "$", "$$", or "$$$" based on context clues
-- why_known: 1-2 sentences grounded in what the sources actually say
+Infer the entity type from the user query (e.g. cafes, startups, tools, restaurants, people).
+
+Each entity must have these fields:
+- entity_name: the primary name of the entity
+- category: a short label for what kind of entity it is (e.g. "cafe", "startup", "database tool")
+- location: city/region if applicable, else null
+- website: official URL if found, else null
+- key_attribute: the single most notable thing about this entity (a product, drink, feature, achievement)
+- description: 1-2 sentences grounded in what the sources actually say
 - source_url: the URL this entity was primarily found at
-- source_snippet: a brief paraphrase (max 25 words) of what the source says about this cafe/drink
+- source_snippet: a brief paraphrase (max 25 words) of what the source says
 - confidence: "high" if mentioned in 2+ results, "medium" if mentioned once with detail, "low" if vague
 
 STRICT RULES:
 - Only extract entities that actually appear in the search results
-- Never invent or hallucinate cafe names, drinks, or URLs
+- Never invent or hallucinate names, URLs, or facts
 - source_url must be a real URL from the results
-- Aim for 8-12 entities with variety in neighborhoods, drink types, price ranges
-- If a field cannot be determined from the results, use null
-- Return ONLY a valid JSON array. No markdown, no explanation, no preamble."""
+- Aim for 8-12 entities
+- If a field cannot be determined, use null
+- Return ONLY a valid JSON array. No markdown, no explanation."""
 
-
-async def extract_entities(user_query: str, search_context: str) -> list[dict]:
-    """
-    Feed all search results to Groq and extract structured entities.
-    """
     user_message = f"""User query: "{user_query}"
 
-Here are the web search results:
+Search results:
 {search_context}
 
-Extract all cafe entities from these results and return a JSON array.
-Only extract what is actually in the results above. Return ONLY the JSON array."""
+Extract all entities and return a JSON array."""
 
     resp = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
-            {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
         max_tokens=4000,
@@ -197,14 +215,17 @@ Only extract what is actually in the results above. Return ONLY the JSON array."
     end = text.rfind("]") + 1
     if start == -1 or end == 0:
         raise ValueError(f"No JSON array in Groq response: {text[:300]}")
+    
+    print("=== GROQ RAW ===")          
+    print(text[start:end][:800])
 
     return json.loads(text[start:end])
 
 
 def normalize_entity(e: dict) -> dict:
     fields = [
-        "cafe_name", "neighborhood", "website", "signature_drink",
-        "drink_type", "price_range", "why_known", "source_url",
+        "entity_name", "category", "location", "website",
+        "key_attribute", "description", "source_url",
         "source_snippet", "confidence",
     ]
     return {f: e.get(f) for f in fields}
@@ -257,15 +278,26 @@ async def discover(req: QueryRequest):
 
     try:
         search_queries = build_search_queries(req.query)
-
         all_results = []
         for q in search_queries:
             results = await brave_search(q, count=8)
-            all_results.append((q, results))
+            if results:
+                all_results.append((q, results))
+
+        if not all_results:
+            raise HTTPException(status_code=502, detail="Brave Search returned no results for any query.")
 
         search_context = format_search_results(all_results)
+        
+        print("=== SEARCH CONTEXT LENGTH ===", len(search_context))
+        print("=== SEARCH CONTEXT PREVIEW ===")
+        print(search_context[:500])
+        
         entities = await extract_entities(req.query, search_context)
-        entities = [normalize_entity(e) for e in entities if isinstance(e, dict)]
+        
+        print("=== RAW ENTITIES COUNT ===", len(entities))
+        
+        entities = [normalize_entity(e) for e in entities if isinstance(e, dict) and e.get("entity_name")]
 
         set_cache(req.query, entities)
 
@@ -278,9 +310,13 @@ async def discover(req: QueryRequest):
             latency_ms=int((datetime.now() - start).total_seconds() * 1000),
         )
 
+    except HTTPException:
+        raise  # don't swallow HTTP exceptions
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=502, detail=f"Brave Search error: {e.response.status_code} {e.response.text[:200]}")
     except Exception as e:
+        import traceback
+        traceback.print_exc()  # prints full stack trace to uvicorn terminal
         raise HTTPException(status_code=500, detail=str(e))
 
 

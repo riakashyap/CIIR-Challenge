@@ -5,7 +5,7 @@
  Brave Search (3 queries) and Groq LLM extraction and structured JSON
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'
 
 /**
   Calls POST /discover on the backend and returns structured entities.

@@ -3,12 +3,12 @@ import { discover } from './pipeline.js'
 import styles from './App.module.css'
 
 const EXAMPLE_QUERIES = [
-  { label: '☕ Brooklyn', query: 'Top cafes in Brooklyn and the best coffee to order at each' },
-  { label: '☕ Boston', query: 'Top specialty coffee shops in Boston and what to order' },
-  { label: '☕ Seattle', query: 'Best cafes in Seattle and their signature coffee drinks' },
-  { label: '☕ San Francisco', query: 'Best espresso drinks at top-rated cafes in San Francisco' },
-  { label: '☕ Portland', query: 'Best cafes in Portland Oregon and the best coffee to order at each' },
-  { label: '☕ Chicago', query: 'Top specialty coffee shops in Chicago and what to order' },
+  { label: '🍕 Chicago pizza', query: 'Best pizza places in Chicago and their signature dishes' },
+  { label: '🤖 AI startups', query: 'Top AI startups in healthcare and what they do' },
+  { label: '🗄️ Dev tools', query: 'Best open source database tools and their key features' },
+  { label: '☕ NYC coffee', query: 'Top specialty coffee shops in New York and what to order' },
+  { label: '🎵 Music apps', query: 'Top music streaming platforms and their standout features' },
+  { label: '💊 Biotech', query: 'Leading biotech companies working on cancer treatment' },
 ]
 
 const PIPELINE_STAGES = [
@@ -20,7 +20,7 @@ const PIPELINE_STAGES = [
 ]
 
 export default function App() {
-  const [query, setQuery] = useState('Top cafes in Brooklyn and the best coffee to order at each')
+  const [query, setQuery] = useState('Best restaurants Chicago and what to order')
   const [status, setStatus] = useState('idle') // idle | running | done | error
   const [logs, setLogs] = useState([])
   const [entities, setEntities] = useState([])
@@ -110,7 +110,7 @@ export default function App() {
   }
 
   const exportCsv = () => {
-    const headers = ['cafe_name', 'neighborhood', 'website', 'signature_drink', 'drink_type', 'price_range', 'why_known', 'source_url', 'source_snippet', 'confidence']
+    const headers = ['entity_name', 'category', 'location', 'website', 'key_attribute', 'description', 'source_url', 'source_snippet', 'confidence']
     const rows = entities.map((e) => headers.map((h) => JSON.stringify(e[h] ?? '')).join(','))
     const csv = [headers.join(','), ...rows].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
@@ -134,9 +134,9 @@ export default function App() {
       <div className={styles.hero}>
         <div className={styles.heroEyebrow}>Entity Discovery System</div>
         <h1 className={styles.heroTitle}>
-          Find the best <span>cafes</span> &amp; what to order
+          Discover <span>anything</span> from the web
         </h1>
-        <p className={styles.heroSub}>Multi-stage AI pipeline: search → scrape → extract → structure</p>
+        <p className={styles.heroSub}>Multi-stage AI pipeline: search, scrape, extract, structure</p>
       </div>
 
       {/* Search */}
@@ -148,7 +148,7 @@ export default function App() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && runSearch()}
-            placeholder="Top cafes in Brooklyn and the best coffee to order at each"
+            placeholder="Best restaurants Chicago and what to order"
           />
           <button
             className={styles.searchBtn}
@@ -242,10 +242,10 @@ export default function App() {
         {/* Empty state */}
         {status === 'idle' && entities.length === 0 && (
           <div className={styles.emptyState}>
-            <div className={styles.emptyIcon}>☕</div>
+            <div className={styles.emptyIcon}>✦</div>
             <div className={styles.emptyTitle}>Enter a query to discover entities</div>
             <div className={styles.emptyBody}>
-              Try: "Top cafes in Brooklyn and the best coffee to order at each"
+              Try: "Top AI startups in healthcare" or "Best pizza in Chicago"
             </div>
           </div>
         )}
@@ -260,11 +260,11 @@ function EntityTable({ entities }) {
       <table className={styles.table}>
         <thead>
           <tr>
-            <th>Cafe</th>
-            <th>Signature drink</th>
-            <th>Type</th>
-            <th>Price</th>
-            <th>Why it's known</th>
+            <th>Entity</th>
+            <th>Key attribute</th>
+            <th>Category</th>
+            <th>Location</th>
+            <th>Description</th>
             <th>Website</th>
             <th>Source &amp; evidence</th>
           </tr>
@@ -273,20 +273,19 @@ function EntityTable({ entities }) {
           {entities.map((e, i) => (
             <tr key={i}>
               <td>
-                <div className={styles.cafeName}>{e.cafe_name || '—'}</div>
-                <div className={styles.neighborhood}>{e.neighborhood || ''}</div>
+                <div className={styles.cafeName}>{e.entity_name || '—'}</div>
               </td>
               <td>
-                <div className={styles.drinkBadge}>{e.signature_drink || '—'}</div>
+                <div className={styles.drinkBadge}>{e.key_attribute || '—'}</div>
               </td>
               <td>
-                <div className={styles.drinkType}>{e.drink_type || '—'}</div>
+                <div className={styles.drinkType}>{e.category || '—'}</div>
               </td>
               <td>
-                <div className={styles.price}>{e.price_range || '—'}</div>
+                <div className={styles.drinkType}>{e.location || '—'}</div>
               </td>
               <td>
-                <div className={styles.whyText}>{e.why_known || '—'}</div>
+                <div className={styles.whyText}>{e.description || '—'}</div>
               </td>
               <td>
                 {e.website ? (
